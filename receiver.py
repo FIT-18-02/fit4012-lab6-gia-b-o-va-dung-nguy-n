@@ -90,7 +90,7 @@ def run_receiver():
 
         plaintext_str = plaintext_bytes.decode("utf-8")
 
-        print(f"[>>>] Nội dung giải mã thành công: {plaintext_str}")
+        print(f"[+] Bản tin gốc: {plaintext_str}")
 
         Path(OUTPUT_FILE).write_text(
             plaintext_str,
@@ -101,7 +101,7 @@ def run_receiver():
             lines = [
                 "==========================================",
                 "[+] TRẠNG THÁI: Nhận và giải mã thành công!",
-                f"[+] Decrypted: {plaintext_str}",
+                f"[+] Bản tin gốc: {plaintext_str}",
                 "==========================================",
             ]
 
