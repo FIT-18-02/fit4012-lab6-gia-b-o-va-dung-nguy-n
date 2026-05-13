@@ -1,1 +1,3 @@
-Xin chao FIT4012 - Day la file input mau cho Lab 6 AES Socket.
+Xin chao FIT4012, toi la Nguyen Anh Dung (1871020167). 
+Day la du lieu mau dung de kiem tra he thong truyen nhan AES-CBC qua Socket.
+Chuc ca nhom lam Lab 6 thanh cong va lay duoc tich xanh!
