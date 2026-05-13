@@ -1,7 +1,13 @@
 import os
 import socket
 from pathlib import Path
-from aes_socket_utils import parse_key_packet, parse_length_header, recv_exact, decrypt_aes_cbc
+
+from aes_socket_utils import (
+    parse_key_packet,
+    parse_length_header,
+    recv_exact,
+    decrypt_aes_cbc
+)
 
 # --- Cấu hình hệ thống từ môi trường hoặc mặc định ---
 RECEIVER_HOST = os.getenv("RECEIVER_HOST", "127.0.0.1")
@@ -9,57 +15,105 @@ DATA_PORT = int(os.getenv("DATA_PORT", "6000"))
 KEY_PORT = int(os.getenv("KEY_PORT", "6001"))
 OUTPUT_FILE = os.getenv("OUTPUT_FILE", "sample_output.txt")
 LOG_FILE = os.getenv("RECEIVER_LOG_FILE", "")
+TIMEOUT = float(os.getenv("SOCKET_TIMEOUT", "10"))
+
 
 def run_receiver():
     print(f"--- [RECEIVER] Đang lắng nghe tại {RECEIVER_HOST} ---")
 
-    # 1. Nhận Key và IV từ KEY_PORT (Kênh điều khiển)
-    key_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # Cho phép sử dụng lại địa chỉ cổng ngay lập tức sau khi đóng
-    key_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    key_server.bind((RECEIVER_HOST, KEY_PORT))
-    key_server.listen(1)
-    print(f"[*] Đang chờ Key/IV tại cổng {KEY_PORT}...")
-    
-    conn_key, _ = key_server.accept()
-    with conn_key:
-        header = recv_exact(conn_key, 4)
-        key_len = parse_length_header(header)
-        # Nhận toàn bộ gói tin khóa: header + key + iv (16 bytes)
-        packet = header + recv_exact(conn_key, key_len + 16)
-        key, iv = parse_key_packet(packet)
-    key_server.close()
-    print(f"[OK] Đã nhận Key và IV thành công.")
+    key_server = None
+    data_server = None
 
-    # 2. Nhận Bản mã từ DATA_PORT (Kênh dữ liệu)
-    data_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    data_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    data_server.bind((RECEIVER_HOST, DATA_PORT))
-    data_server.listen(1)
-    print(f"[*] Đang chờ bản mã tại cổng {DATA_PORT}...")
-    
-    conn_data, _ = data_server.accept()
-    with conn_data:
-        header = recv_exact(conn_data, 4)
-        ciphertext_len = parse_length_header(header)
-        ciphertext = recv_exact(conn_data, ciphertext_len)
-    data_server.close()
-    print(f"[OK] Đã nhận bản mã ({ciphertext_len} bytes).")
-
-    # 3. Giải mã và lưu kết quả
     try:
-        # Giải mã trả về dữ liệu kiểu bytes
-        plaintext_bytes = decrypt_aes_cbc(key, iv, ciphertext)
-        
-        # CHỖ SỬA QUAN TRỌNG: Chuyển bytes thành string UTF-8 để in và lưu file
-        plaintext_str = plaintext_bytes.decode('utf-8')
-        
+        # ==================================================
+        # 1. Nhận KEY + IV
+        # ==================================================
+        key_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        key_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # THÊM TIMEOUT
+        key_server.settimeout(TIMEOUT)
+
+        key_server.bind((RECEIVER_HOST, KEY_PORT))
+        key_server.listen(1)
+
+        print(f"[*] Đang chờ Key/IV tại cổng {KEY_PORT}...")
+
+        conn_key, _ = key_server.accept()
+
+        with conn_key:
+            conn_key.settimeout(TIMEOUT)
+
+            header = recv_exact(conn_key, 4)
+
+            key_len = parse_length_header(header)
+
+            packet = header + recv_exact(
+                conn_key,
+                key_len + 16
+            )
+
+            key, iv = parse_key_packet(packet)
+
+        key_server.close()
+
+        print("[OK] Đã nhận Key và IV thành công.")
+
+        # ==================================================
+        # 2. Nhận ciphertext
+        # ==================================================
+        data_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        data_server.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_REUSEADDR,
+            1
+        )
+
+        # THÊM TIMEOUT
+        data_server.settimeout(TIMEOUT)
+
+        data_server.bind((RECEIVER_HOST, DATA_PORT))
+        data_server.listen(1)
+
+        print(f"[*] Đang chờ bản mã tại cổng {DATA_PORT}...")
+
+        conn_data, _ = data_server.accept()
+
+        with conn_data:
+            conn_data.settimeout(TIMEOUT)
+
+            header = recv_exact(conn_data, 4)
+
+            ciphertext_len = parse_length_header(header)
+
+            ciphertext = recv_exact(
+                conn_data,
+                ciphertext_len
+            )
+
+        data_server.close()
+
+        print(f"[OK] Đã nhận bản mã ({ciphertext_len} bytes).")
+
+        # ==================================================
+        # 3. Giải mã
+        # ==================================================
+        plaintext_bytes = decrypt_aes_cbc(
+            key,
+            iv,
+            ciphertext
+        )
+
+        plaintext_str = plaintext_bytes.decode("utf-8")
+
         print(f"\n[>>>] Nội dung giải mã thành công: {plaintext_str}")
-        
-        # Lưu ra file sample_output.txt (hàm write_text cần string)
-        Path(OUTPUT_FILE).write_text(plaintext_str, encoding="utf-8")
-        
-        # Ghi Log minh chứng cho CI
+
+        Path(OUTPUT_FILE).write_text(
+            plaintext_str,
+            encoding="utf-8"
+        )
+
         if LOG_FILE:
             lines = [
                 "==========================================",
@@ -70,13 +124,34 @@ def run_receiver():
                 f"[+] Decrypted: {plaintext_str}",
                 "==========================================",
             ]
+
             log_path = Path(LOG_FILE)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            log_path.parent.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
+            log_path.write_text(
+                "\n".join(lines) + "\n",
+                encoding="utf-8"
+            )
+
             print(f"[*] Đã lưu minh chứng vào: {LOG_FILE}")
-            
+
+    except socket.timeout:
+        print("[!] Socket timeout.")
+
     except Exception as e:
-        print(f"[!] Lỗi khi xử lý dữ liệu giải mã: {e}")
+        print(f"[!] Lỗi: {e}")
+
+    finally:
+        if key_server:
+            key_server.close()
+
+        if data_server:
+            data_server.close()
+
 
 if __name__ == "__main__":
     run_receiver()
