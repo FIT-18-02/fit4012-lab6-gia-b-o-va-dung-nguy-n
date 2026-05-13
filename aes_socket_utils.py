@@ -164,6 +164,9 @@ def build_data_packet(cipher_bytes: bytes) -> bytes:
     if not isinstance(cipher_bytes, bytes):
         raise TypeError("cipher_bytes phải là bytes.")
 
+    if not cipher_bytes:
+        raise ValueError("Bản mã không được rỗng.")
+
     return struct.pack("!I", len(cipher_bytes)) + cipher_bytes
 
 

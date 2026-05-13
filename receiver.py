@@ -37,7 +37,7 @@ def run_receiver():
         key_server.bind((RECEIVER_HOST, KEY_PORT))
         key_server.listen(1)
 
-        print(f"[*] Đang chờ Key/IV tại cổng {KEY_PORT}...")
+        print(f"[*] Đang lắng nghe kênh khóa tại cổng {KEY_PORT}...")
 
         conn_key, _ = key_server.accept()
 
@@ -76,7 +76,7 @@ def run_receiver():
         data_server.bind((RECEIVER_HOST, DATA_PORT))
         data_server.listen(1)
 
-        print(f"[*] Đang chờ bản mã tại cổng {DATA_PORT}...")
+        print(f"[*] Đang lắng nghe kênh dữ liệu tại cổng {DATA_PORT}...")
 
         conn_data, _ = data_server.accept()
 
