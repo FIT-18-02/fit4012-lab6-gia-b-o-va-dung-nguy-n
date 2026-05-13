@@ -9,7 +9,6 @@ from aes_socket_utils import (
     decrypt_aes_cbc
 )
 
-# --- Cấu hình hệ thống từ môi trường hoặc mặc định ---
 RECEIVER_HOST = os.getenv("RECEIVER_HOST", "127.0.0.1")
 DATA_PORT = int(os.getenv("DATA_PORT", "6000"))
 KEY_PORT = int(os.getenv("KEY_PORT", "6001"))
@@ -21,21 +20,28 @@ TIMEOUT = float(os.getenv("SOCKET_TIMEOUT", "10"))
 def run_receiver():
     print(f"--- [RECEIVER] Đang lắng nghe tại {RECEIVER_HOST} ---")
 
-    key_server = None
-    data_server = None
+    key_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    data_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         # ==================================================
-        # 1. Nhận KEY + IV
+        # Mở cả 2 kênh trước
         # ==================================================
-        key_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         key_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        data_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         key_server.bind((RECEIVER_HOST, KEY_PORT))
+        data_server.bind((RECEIVER_HOST, DATA_PORT))
+
         key_server.listen(1)
+        data_server.listen(1)
 
         print(f"[*] Đang lắng nghe kênh khóa tại cổng {KEY_PORT}...")
+        print(f"[*] Đang lắng nghe kênh dữ liệu tại cổng {DATA_PORT}...")
 
+        # ==================================================
+        # Nhận KEY CHANNEL
+        # ==================================================
         conn_key, _ = key_server.accept()
 
         with conn_key:
@@ -52,26 +58,11 @@ def run_receiver():
 
             key, iv = parse_key_packet(packet)
 
-        key_server.close()
-
         print("[OK] Đã nhận Key và IV thành công.")
 
         # ==================================================
-        # 2. Nhận ciphertext
+        # Nhận DATA CHANNEL
         # ==================================================
-        data_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        data_server.setsockopt(
-            socket.SOL_SOCKET,
-            socket.SO_REUSEADDR,
-            1
-        )
-
-        data_server.bind((RECEIVER_HOST, DATA_PORT))
-        data_server.listen(1)
-
-        print(f"[*] Đang lắng nghe kênh dữ liệu tại cổng {DATA_PORT}...")
-
         conn_data, _ = data_server.accept()
 
         with conn_data:
@@ -86,12 +77,10 @@ def run_receiver():
                 ciphertext_len
             )
 
-        data_server.close()
-
         print(f"[OK] Đã nhận bản mã ({ciphertext_len} bytes).")
 
         # ==================================================
-        # 3. Giải mã
+        # Giải mã
         # ==================================================
         plaintext_bytes = decrypt_aes_cbc(
             key,
@@ -101,7 +90,7 @@ def run_receiver():
 
         plaintext_str = plaintext_bytes.decode("utf-8")
 
-        print(f"\n[>>>] Nội dung giải mã thành công: {plaintext_str}")
+        print(f"[>>>] Nội dung giải mã thành công: {plaintext_str}")
 
         Path(OUTPUT_FILE).write_text(
             plaintext_str,
@@ -112,9 +101,6 @@ def run_receiver():
             lines = [
                 "==========================================",
                 "[+] TRẠNG THÁI: Nhận và giải mã thành công!",
-                f"[+] Key (hex): {key.hex()}",
-                f"[+] IV (hex):  {iv.hex()}",
-                f"[+] Ciphertext: {ciphertext_len} bytes",
                 f"[+] Decrypted: {plaintext_str}",
                 "==========================================",
             ]
@@ -131,20 +117,12 @@ def run_receiver():
                 encoding="utf-8"
             )
 
-            print(f"[*] Đã lưu minh chứng vào: {LOG_FILE}")
-
-    except socket.timeout:
-        print("[!] Socket timeout.")
-
     except Exception as e:
         print(f"[!] Lỗi: {e}")
 
     finally:
-        if key_server:
-            key_server.close()
-
-        if data_server:
-            data_server.close()
+        key_server.close()
+        data_server.close()
 
 
 if __name__ == "__main__":
