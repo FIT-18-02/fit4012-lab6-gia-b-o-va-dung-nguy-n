@@ -1,104 +1,77 @@
 import os
 import socket
 from pathlib import Path
+from aes_socket_utils import parse_key_packet, parse_length_header, recv_exact, decrypt_aes_cbc
 
-from aes_socket_utils import (
-    LENGTH_HEADER_SIZE,
-    decrypt_aes_cbc,
-    parse_key_packet,
-    parse_length_header,
-    recv_exact,
-)
-
-HOST = os.getenv("RECEIVER_HOST", "0.0.0.0")
+# --- Cấu hình hệ thống từ môi trường hoặc mặc định ---
+RECEIVER_HOST = os.getenv("RECEIVER_HOST", "127.0.0.1")
 DATA_PORT = int(os.getenv("DATA_PORT", "6000"))
 KEY_PORT = int(os.getenv("KEY_PORT", "6001"))
-TIMEOUT = float(os.getenv("SOCKET_TIMEOUT", "10"))
-OUTPUT_FILE = os.getenv("OUTPUT_FILE", "")
+OUTPUT_FILE = os.getenv("OUTPUT_FILE", "sample_output.txt")
 LOG_FILE = os.getenv("RECEIVER_LOG_FILE", "")
 
+def run_receiver():
+    print(f"--- [RECEIVER] Đang lắng nghe tại {RECEIVER_HOST} ---")
 
-def receive_key_packet() -> bytes:
-    """Listen on KEY_PORT and receive key_length + key + iv."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.settimeout(TIMEOUT)
-        server.bind((HOST, KEY_PORT))
-        server.listen(1)
-        conn, _ = server.accept()
+    # 1. Nhận Key và IV từ KEY_PORT (Kênh điều khiển)
+    key_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # Cho phép sử dụng lại địa chỉ cổng ngay lập tức sau khi đóng
+    key_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    key_server.bind((RECEIVER_HOST, KEY_PORT))
+    key_server.listen(1)
+    print(f"[*] Đang chờ Key/IV tại cổng {KEY_PORT}...")
+    
+    conn_key, _ = key_server.accept()
+    with conn_key:
+        header = recv_exact(conn_key, 4)
+        key_len = parse_length_header(header)
+        # Nhận toàn bộ gói tin khóa: header + key + iv (16 bytes)
+        packet = header + recv_exact(conn_key, key_len + 16)
+        key, iv = parse_key_packet(packet)
+    key_server.close()
+    print(f"[OK] Đã nhận Key và IV thành công.")
 
-        with conn:
-            conn.settimeout(TIMEOUT)
-            key_len_header = recv_exact(conn, 4)
-            key_len = int.from_bytes(key_len_header, "big")
-            rest = recv_exact(conn, key_len + 16)
-            return key_len_header + rest
+    # 2. Nhận Bản mã từ DATA_PORT (Kênh dữ liệu)
+    data_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    data_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    data_server.bind((RECEIVER_HOST, DATA_PORT))
+    data_server.listen(1)
+    print(f"[*] Đang chờ bản mã tại cổng {DATA_PORT}...")
+    
+    conn_data, _ = data_server.accept()
+    with conn_data:
+        header = recv_exact(conn_data, 4)
+        ciphertext_len = parse_length_header(header)
+        ciphertext = recv_exact(conn_data, ciphertext_len)
+    data_server.close()
+    print(f"[OK] Đã nhận bản mã ({ciphertext_len} bytes).")
 
-
-def receive_data_packet() -> bytes:
-    """Listen on DATA_PORT and receive length + ciphertext."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.settimeout(TIMEOUT)
-        server.bind((HOST, DATA_PORT))
-        server.listen(1)
-        conn, _ = server.accept()
-
-        with conn:
-            conn.settimeout(TIMEOUT)
-            length_header = recv_exact(conn, LENGTH_HEADER_SIZE)
-            length = parse_length_header(length_header)
-            ciphertext = recv_exact(conn, length)
-            return length_header + ciphertext
-
-
-def main() -> None:
-    lines = []
-
-    line = f"[*] Receiver đang lắng nghe kênh khóa tại {HOST}:{KEY_PORT}"
-    print(line)
-    lines.append(line)
-
-    key_packet = receive_key_packet()
-    key, iv = parse_key_packet(key_packet)
-
-    line = "[+] Đã nhận AES key và IV."
-    print(line)
-    lines.append(line)
-
-    line = f"[*] Receiver đang lắng nghe kênh dữ liệu tại {HOST}:{DATA_PORT}"
-    print(line)
-    lines.append(line)
-
-    data_packet = receive_data_packet()
-    length = parse_length_header(data_packet[:LENGTH_HEADER_SIZE])
-    ciphertext = data_packet[LENGTH_HEADER_SIZE:]
-
-    if len(ciphertext) != length:
-        raise ValueError("Ciphertext nhận được không khớp length header.")
-
-    line = "[+] Đã nhận ciphertext."
-    print(line)
-    lines.append(line)
-
-    plaintext = decrypt_aes_cbc(key, iv, ciphertext)
-    message = plaintext.decode("utf-8", errors="replace")
-
-    lines.extend([
-        "[+] Đã giải mã thành công.",
-        f"[+] Bản tin gốc: {message}",
-    ])
-
-    print("[+] Đã giải mã thành công.")
-    print(f"[+] Bản tin gốc: {message}")
-
-    if OUTPUT_FILE:
-        Path(OUTPUT_FILE).write_bytes(plaintext)
-
-    if LOG_FILE:
-        Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
-        Path(LOG_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
-
+    # 3. Giải mã và lưu kết quả
+    try:
+        plaintext = decrypt_aes_cbc(key, iv, ciphertext)
+        print(f"\n[>>>] Nội dung giải mã thành công: {plaintext}")
+        
+        # Lưu ra file sample_output.txt
+        Path(OUTPUT_FILE).write_text(plaintext, encoding="utf-8")
+        
+        # Ghi Log minh chứng cho CI
+        if LOG_FILE:
+            lines = [
+                "==========================================",
+                "[+] TRẠNG THÁI: Nhận và giải mã thành công!",
+                f"[+] Key (hex): {key.hex()}",
+                f"[+] IV (hex):  {iv.hex()}",
+                f"[+] Ciphertext: {ciphertext_len} bytes",
+                f"[+] Decrypted: {plaintext}",
+                "==========================================",
+            ]
+            log_path = Path(LOG_FILE)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            print(f"[*] Đã lưu minh chứng vào: {LOG_FILE}")
+            
+    except Exception as e:
+        print(f"[!] Lỗi giải mã: {e}")
 
 if __name__ == "__main__":
-    main()
+    run_receiver()
