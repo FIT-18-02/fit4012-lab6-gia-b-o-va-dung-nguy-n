@@ -31,9 +31,6 @@ def run_receiver():
         key_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         key_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        # THÊM TIMEOUT
-        key_server.settimeout(TIMEOUT)
-
         key_server.bind((RECEIVER_HOST, KEY_PORT))
         key_server.listen(1)
 
@@ -69,9 +66,6 @@ def run_receiver():
             socket.SO_REUSEADDR,
             1
         )
-
-        # THÊM TIMEOUT
-        data_server.settimeout(TIMEOUT)
 
         data_server.bind((RECEIVER_HOST, DATA_PORT))
         data_server.listen(1)
