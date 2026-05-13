@@ -48,11 +48,16 @@ def run_receiver():
 
     # 3. Giải mã và lưu kết quả
     try:
-        plaintext = decrypt_aes_cbc(key, iv, ciphertext)
-        print(f"\n[>>>] Nội dung giải mã thành công: {plaintext}")
+        # Giải mã trả về dữ liệu kiểu bytes
+        plaintext_bytes = decrypt_aes_cbc(key, iv, ciphertext)
         
-        # Lưu ra file sample_output.txt
-        Path(OUTPUT_FILE).write_text(plaintext, encoding="utf-8")
+        # CHỖ SỬA QUAN TRỌNG: Chuyển bytes thành string UTF-8 để in và lưu file
+        plaintext_str = plaintext_bytes.decode('utf-8')
+        
+        print(f"\n[>>>] Nội dung giải mã thành công: {plaintext_str}")
+        
+        # Lưu ra file sample_output.txt (hàm write_text cần string)
+        Path(OUTPUT_FILE).write_text(plaintext_str, encoding="utf-8")
         
         # Ghi Log minh chứng cho CI
         if LOG_FILE:
@@ -62,7 +67,7 @@ def run_receiver():
                 f"[+] Key (hex): {key.hex()}",
                 f"[+] IV (hex):  {iv.hex()}",
                 f"[+] Ciphertext: {ciphertext_len} bytes",
-                f"[+] Decrypted: {plaintext}",
+                f"[+] Decrypted: {plaintext_str}",
                 "==========================================",
             ]
             log_path = Path(LOG_FILE)
@@ -71,7 +76,7 @@ def run_receiver():
             print(f"[*] Đã lưu minh chứng vào: {LOG_FILE}")
             
     except Exception as e:
-        print(f"[!] Lỗi giải mã: {e}")
+        print(f"[!] Lỗi khi xử lý dữ liệu giải mã: {e}")
 
 if __name__ == "__main__":
     run_receiver()
